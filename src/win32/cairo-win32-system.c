@@ -311,7 +311,11 @@ __pragma (comment (linker, "/INCLUDE:" SYMBOL_PREFIX "_ptr_" #func))
 static void NTAPI func (PVOID, DWORD, PVOID);        \
                                                      \
 __attribute__ ((used, section (".CRT$XLD")))         \
-static const PIMAGE_TLS_CALLBACK _ptr_##func = func;
+static const PIMAGE_TLS_CALLBACK _ptr_##func = func; \
+                                                     \
+extern const IMAGE_TLS_DIRECTORY _tls_used;          \
+__attribute__ ((used))                               \
+static const IMAGE_TLS_DIRECTORY *const _tls_used_ref_##func = &_tls_used;
 
 
 #endif /* !_MSC_VER */
