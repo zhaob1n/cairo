@@ -307,6 +307,43 @@ _create_rendering_params(IDWriteRenderingParams     *params,
     return ret;
 }
 
+/* The rendering mode the font asks for at this size, as DirectWrite applications get it.
+ * At UI sizes a gasp table typically asks for NATURAL: horizontal antialiasing with the
+ * vertical direction grid fitted. NATURAL_SYMMETRIC there antialiases vertically too and
+ * rounds each glyph on its own, so glyphs of one line can sit a pixel apart and their tops
+ * and bottoms blur. Returns @fallback without IDWriteFontFace3, and for a recommendation a
+ * glyph run analysis cannot render as requested: ALIASED needs an aliased texture the
+ * caller did not ask for, and OUTLINE is not a rasterizing mode. */
+static DWRITE_RENDERING_MODE1
+_cairo_dwrite_recommended_rendering_mode (cairo_dwrite_scaled_font_t *scaled_font,
+					  const DWRITE_MATRIX        *matrix,
+					  DWRITE_RENDERING_MODE1      fallback)
+{
+    RefPtr<IDWriteFontFace3> face3;
+    if (FAILED(scaled_font->dwriteface->QueryInterface(&face3)))
+	return fallback;
+
+    DWRITE_RENDERING_MODE1 rendering_mode;
+    DWRITE_GRID_FIT_MODE grid_fit_mode;
+    HRESULT hr = face3->GetRecommendedRenderingMode(1.0f, 96.0f, 96.0f, matrix, FALSE,
+						     DWRITE_OUTLINE_THRESHOLD_ANTIALIASED,
+						     scaled_font->measuring_mode,
+						     scaled_font->rendering_params,
+						     &rendering_mode, &grid_fit_mode);
+    if (FAILED(hr))
+	return fallback;
+
+    switch (rendering_mode) {
+    case DWRITE_RENDERING_MODE1_GDI_CLASSIC:
+    case DWRITE_RENDERING_MODE1_GDI_NATURAL:
+    case DWRITE_RENDERING_MODE1_NATURAL:
+    case DWRITE_RENDERING_MODE1_NATURAL_SYMMETRIC:
+	return rendering_mode;
+    default:
+	return fallback;
+    }
+}
+
 /* Functions #cairo_font_face_backend_t */
 static cairo_status_t
 _cairo_dwrite_font_face_create_for_toy (cairo_toy_font_face_t   *toy_face,
@@ -1752,6 +1789,12 @@ create_glyph_bitmap_dwrite (cairo_dwrite_scaled_font_t *scaled_font,
         case CAIRO_HINT_STYLE_FULL:
             grid_fit_mode = DWRITE_GRID_FIT_MODE_ENABLED;
             break;
+    }
+
+    // A request for no hinting keeps NATURAL_SYMMETRIC, which grid fits nothing.
+    if (antialias != ANTIALIAS_NONE && grid_fit_mode != DWRITE_GRID_FIT_MODE_DISABLED) {
+        rendering_mode1 = _cairo_dwrite_recommended_rendering_mode (scaled_font, &matrix, rendering_mode1);
+        rendering_mode = (DWRITE_RENDERING_MODE) rendering_mode1;
     }
 
     cairo_subpixel_order_t subpixel_order;
